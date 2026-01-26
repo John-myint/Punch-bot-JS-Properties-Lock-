@@ -821,32 +821,59 @@ function dailyReport() {
     return;
   }
 
-  // Group by user
-  const userBreaks = {};
+  // Aggregate breaks by type and count per user
+  const userStats = {};
+  const breakTypeCounts = { wc: 0, cy: 0, bwc: 0 };
+  const breakTypeLeaders = { wc: '', cy: '', bwc: '' };
+  
   todayRecords.forEach(row => {
-    const username = String(row[2]); // USERNAME (col 3, index 2)
-    const breakCode = String(row[3]); // BREAK_CODE (col 4, index 3)
-    const timeSpent = row[4]; // TIME_SPENT (col 5, index 4)
-    const status = String(row[6]); // STATUS (col 7, index 6)
+    const username = String(row[2]); // USERNAME
+    const breakCode = String(row[3]); // BREAK_CODE
     
-    if (!userBreaks[username]) {
-      userBreaks[username] = { breaks: [], totalTime: 0, breakCount: 0 };
+    // Only count wc, cy, bwc (skip meal breaks cf+1, cf+2, cf+3)
+    if (breakCode !== 'cf+1' && breakCode !== 'cf+2' && breakCode !== 'cf+3') {
+      if (!userStats[username]) {
+        userStats[username] = { wc: 0, cy: 0, bwc: 0, totalTime: 0 };
+      }
+      
+      const timeSpent = row[4]; // TIME_SPENT
+      userStats[username][breakCode] = (userStats[username][breakCode] || 0) + 1;
+      userStats[username].totalTime += timeSpent;
+      
+      // Track break type totals and leaders
+      breakTypeCounts[breakCode]++;
+      if (!breakTypeLeaders[breakCode] || userStats[username][breakCode] > userStats[breakTypeLeaders[breakCode]][breakCode]) {
+        breakTypeLeaders[breakCode] = username;
+      }
     }
-    
-    const breakInfo = `${breakCode}: ${timeSpent}min [${status}]`;
-    userBreaks[username].breaks.push(breakInfo);
-    userBreaks[username].totalTime += timeSpent;
-    userBreaks[username].breakCount++;
   });
 
   // Build report
   let report = `📊 *DAILY REPORT - ${today}*\n\n`;
-  for (const [username, userStats] of Object.entries(userBreaks)) {
+  
+  // User stats
+  report += `*👥 BREAK COUNT BY USER:*\n`;
+  for (const [username, stats] of Object.entries(userStats)) {
     report += `👤 *${username}*\n`;
-    userStats.breaks.forEach(breakInfo => {
-      report += `   • ${breakInfo}\n`;
-    });
-    report += `   📈 ${userStats.breakCount} breaks | Total: ${userStats.totalTime}min\n\n`;
+    if (stats.wc > 0) report += `   🚽 WC: ${stats.wc}x\n`;
+    if (stats.cy > 0) report += `   🚬 CY: ${stats.cy}x\n`;
+    if (stats.bwc > 0) report += `   💩 BWC: ${stats.bwc}x\n`;
+    report += `   ⏱️ Total time: ${stats.totalTime}min\n\n`;
+  }
+  
+  // Leaderboard
+  report += `*🏆 LEADERBOARD:*\n`;
+  
+  if (breakTypeLeaders.bwc) {
+    report += `💩 *King of Poop (BWC):* @${breakTypeLeaders.bwc} (${userStats[breakTypeLeaders.bwc].bwc}x)\n`;
+  }
+  
+  if (breakTypeLeaders.wc) {
+    report += `🚽 *King of Pee (WC):* @${breakTypeLeaders.wc} (${userStats[breakTypeLeaders.wc].wc}x)\n`;
+  }
+  
+  if (breakTypeLeaders.cy) {
+    report += `🚬 *King of Smoke (CY):* @${breakTypeLeaders.cy} (${userStats[breakTypeLeaders.cy].cy}x)\n`;
   }
 
   // Send to all chat IDs from Punch Logs
