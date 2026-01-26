@@ -2,9 +2,9 @@
 // === PUNCH BOT - Google Apps Script ===
 // ============================================
 // A fun, sarcastic Telegram bot for tracking team breaks
-// Webhook handler for real-time break logging
+// Webhook handler for real-time break logging + FIFO Queue
 // 
-// PRODUCTION READY - v1.0
+// PRODUCTION READY - v2.1
 // Last Updated: January 26, 2026
 // 
 // Features:
@@ -13,6 +13,7 @@
 // - Auto-punch after expected duration + 5 min
 // - Daily reports at 8 PM
 // - Monthly data archival
+// - Concurrent request handling via FIFO queue
 // - Group chat ready with username tagging
 // 
 // Setup: Configure SHEET_ID and BOT_TOKEN in Script Properties
