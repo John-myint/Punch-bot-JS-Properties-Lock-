@@ -46,7 +46,6 @@ const BREAKS = {
 // Sheet names
 const LIVE_BREAKS_SHEET = 'Live_Breaks';
 const PUNCH_LOG_SHEET = 'Punch_Logs';
-const QUEUE_SHEET = 'Queue';
 
 // Helper function to get or create a sheet
 function getOrCreateSheet(sheetName) {
@@ -59,11 +58,6 @@ function getOrCreateSheet(sheetName) {
       sheet = spreadsheet.insertSheet(sheetName, 1); // Position 1 = first sheet
       // Live Breaks: 7 columns (no break name)
       const headers = ['DATE', 'TIME', 'USERNAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID'];
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    } else if (sheetName === QUEUE_SHEET) {
-      sheet = spreadsheet.insertSheet(sheetName, 2); // Position 2
-      // Queue: TIMESTAMP | USERNAME | CHAT_ID | ACTION | PARAM
-      const headers = ['TIMESTAMP', 'USERNAME', 'CHAT_ID', 'ACTION', 'PARAM'];
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     } else {
       sheet = spreadsheet.insertSheet(sheetName); // Punch Log at end
@@ -492,74 +486,6 @@ function autoPunchBackOvertime() {
   Logger.log('Summary: Found ' + foundBreaks + ' breaks, Auto-punched ' + autoPunched);
 }
 
-// === QUEUE MANAGEMENT ===
-function addToQueue(username, chatId, action, param) {
-  const queueSheet = getOrCreateSheet(QUEUE_SHEET);
-  const now = new Date();
-  const timestamp = now.toLocaleTimeString();
-  
-  const newRow = queueSheet.getLastRow() + 1;
-  queueSheet.getRange(newRow, 1).setValue(timestamp).setNumberFormat('@');
-  queueSheet.getRange(newRow, 2).setValue(username).setNumberFormat('@');
-  queueSheet.getRange(newRow, 3).setValue(String(chatId)).setNumberFormat('@');
-  queueSheet.getRange(newRow, 4).setValue(action).setNumberFormat('@');
-  queueSheet.getRange(newRow, 5).setValue(param).setNumberFormat('@');
-  
-  Logger.log('✅ Added to queue: ' + action + ' for ' + username);
-}
-
-function processQueue() {
-  const queueSheet = getOrCreateSheet(QUEUE_SHEET);
-  const data = queueSheet.getDataRange().getValues();
-  
-  Logger.log('=== PROCESSING QUEUE ===');
-  Logger.log('Queue entries: ' + (data.length - 1));
-  
-  if (data.length <= 1) {
-    Logger.log('Queue is empty');
-    return;
-  }
-  
-  // Process first entry (index 1, since index 0 is header)
-  const row = data[1];
-  const username = String(row[1]);
-  const chatId = String(row[2]);
-  const action = String(row[3]);
-  const param = String(row[4]);
-  
-  Logger.log('Processing: ' + action + ' for ' + username);
-  
-  try {
-    if (action === 'BREAK_START') {
-      const result = processBreak(username, param, 0, chatId);
-      if (result.success) {
-        const response = `👤 @${username}\n\n${getRandomSarcasm(param, 'breakStarted')}\n\n⏱️ ${BREAKS[param].name} (${BREAKS[param].duration} min)\n📊 ${result.message}`;
-        sendTelegramMessage(chatId, response);
-      } else {
-        const response = `👤 @${username}\n\n${result.message}`;
-        sendTelegramMessage(chatId, response);
-      }
-    } else if (action === 'BREAK_END') {
-      const result = handlePunchBack(username, chatId);
-      if (result.success) {
-        const response = `👤 @${username}\n\n${getRandomSarcasm(result.breakCode, 'welcomeBack')}\n\n${result.message}`;
-        sendTelegramMessage(chatId, response);
-      } else {
-        sendTelegramMessage(chatId, `👤 @${username}\n\n${result.message}`);
-      }
-    } else if (action === 'BREAK_CANCEL') {
-      handleCancel(username, chatId, 0);
-    }
-    
-    // Delete processed entry
-    queueSheet.deleteRow(2); // Always delete row 2 (first data row after header)
-    Logger.log('✅ Processed and deleted: ' + action);
-    
-  } catch (error) {
-    Logger.log('❌ Error processing queue: ' + error);
-  }
-}
-
 // === MAIN WEBHOOK HANDLER ===
 function doPost(e) {
   try {
@@ -580,8 +506,13 @@ function doPost(e) {
 
     // Check for punch back keywords first
     if (BACK_KEYWORDS.includes(text)) {
-      addToQueue(username, chatId, 'BREAK_END', 'end');
-      sendTelegramMessage(chatId, `👤 @${username}\n\n⏳ Processing your punch back...`);
+      const result = handlePunchBack(username, chatId);
+      if (result.success) {
+        const response = `👤 @${username}\n\n${getRandomSarcasm(result.breakCode, 'welcomeBack')}\n\n${result.message}`;
+        sendTelegramMessage(chatId, response);
+      } else {
+        sendTelegramMessage(chatId, `👤 @${username}\n\n${result.message}`);
+      }
       return HtmlService.createHtmlOutput('ok');
     }
 
@@ -589,8 +520,7 @@ function doPost(e) {
     const breakCode = parseBreakCode(text);
 
     if (breakCode === 'cancel') {
-      addToQueue(username, chatId, 'BREAK_CANCEL', 'cancel');
-      sendTelegramMessage(chatId, `👤 @${username}\n\n⏳ Cancelling your break...`);
+      handleCancel(username, chatId, 0);
       return HtmlService.createHtmlOutput('ok');
     }
 
@@ -600,9 +530,15 @@ function doPost(e) {
       return HtmlService.createHtmlOutput('ok');
     }
 
-    // Add to queue for processing
-    addToQueue(username, chatId, 'BREAK_START', breakCode);
-    sendTelegramMessage(chatId, `👤 @${username}\n\n⏳ Processing your break request...`);
+    // Process break directly
+    const result = processBreak(username, breakCode, userId, chatId);
+    if (result.success) {
+      const response = `👤 @${username}\n\n${getRandomSarcasm(breakCode, 'breakStarted')}\n\n⏱️ ${BREAKS[breakCode].name} (${BREAKS[breakCode].duration} min)\n📊 ${result.message}`;
+      sendTelegramMessage(chatId, response);
+    } else {
+      const response = `👤 @${username}\n\n${result.message}`;
+      sendTelegramMessage(chatId, response);
+    }
 
     return HtmlService.createHtmlOutput('ok');
   } catch (error) {
@@ -1013,12 +949,6 @@ function setupTriggers() {
   
   // Remove old triggers
   ScriptApp.getProjectTriggers().forEach(trigger => ScriptApp.deleteTrigger(trigger));
-  
-  // Process queue every 1 second (for concurrent requests)
-  ScriptApp.newTrigger('processQueue')
-    .timeBased()
-    .everySeconds(1)
-    .create();
   
   // Auto punch back overtime breaks every minute
   ScriptApp.newTrigger('autoPunchBackOvertime')
