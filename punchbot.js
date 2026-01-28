@@ -500,7 +500,10 @@ function doPost(e) {
     const text = (message.text || '').toLowerCase().trim();
     const chatId = message.chat.id;
     const userId = message.from.id;
-    const username = message.from.username || message.from.first_name || 'Anonymous';
+    // Use actual name instead of username handle
+    const firstName = message.from.first_name || '';
+    const lastName = message.from.last_name || '';
+    const username = (firstName + ' ' + lastName).trim() || message.from.username || 'Anonymous';
     const messageId = message.message_id;
 
     Logger.log('📬 Telegram message: ' + text + ' from ' + username);
@@ -550,9 +553,10 @@ function doPost(e) {
 
 // === PARSE BREAK CODE ===
 function parseBreakCode(text) {
-  // Remove all spaces for flexible matching
-  const cleanText = text.replace(/\s+/g, '');
+  // Remove extra spaces and normalize to lowercase
+  const cleanText = text.trim().toLowerCase();
   
+  // Check for cancel keywords (exact match only)
   if (['c', 'cancel', 'reset'].includes(cleanText)) {
     return 'cancel';
   }
@@ -562,8 +566,11 @@ function parseBreakCode(text) {
   const sortedCodes = Object.keys(BREAKS).sort((a, b) => b.length - a.length);
   
   for (const code of sortedCodes) {
-    const cleanCode = code.replace(/\s+/g, '');
-    if (cleanText.includes(cleanCode)) {
+    const cleanCode = code.toLowerCase();
+    
+    // EXACT MATCH ONLY: Check if the entire text equals the break code
+    // This prevents "bwc+3", "bwcx3", or "bwc cy" from matching
+    if (cleanText === cleanCode) {
       return code;
     }
   }
