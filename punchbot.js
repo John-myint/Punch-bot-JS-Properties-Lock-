@@ -58,12 +58,12 @@ function getOrCreateSheet(sheetName) {
     if (sheetName === LIVE_BREAKS_SHEET) {
       sheet = spreadsheet.insertSheet(sheetName, 1); // Position 1 = first sheet
       // Live Breaks: 7 columns (no break name)
-      const headers = ['DATE', 'TIME', 'USERNAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID'];
+      const headers = ['DATE', 'TIME', 'NAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID'];
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     } else {
       sheet = spreadsheet.insertSheet(sheetName); // Punch Log at end
       // Punch Logs: 8 columns (simplified - no break name)
-      const headers = ['DATE', 'TIME_START', 'USERNAME', 'BREAK_CODE', 'TIME_SPENT', 'TIME_END', 'STATUS', 'CHAT_ID'];
+      const headers = ['DATE', 'TIME_START', 'NAME', 'BREAK_CODE', 'TIME_SPENT', 'TIME_END', 'STATUS', 'CHAT_ID'];
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     }
   }
@@ -414,7 +414,7 @@ function autoPunchBackOvertime() {
     if (rowDate === today && rowStatus === 'ON BREAK') {
       foundBreaks++;
       
-      const username = data[i][2]; // USERNAME (col 3, index 2)
+      const username = data[i][2]; // NAME (col 3, index 2)
       const breakCode = data[i][3]; // BREAK_CODE (col 4, index 3)
       const breakStartTime = String(data[i][1]); // TIME (col 2, index 1)
       const expectedDuration = parseInt(data[i][4]); // EXPECTED_DURATION (col 5, index 4)
@@ -630,7 +630,7 @@ function processBreak(username, breakCode, userId, chatId) {
   // Log the break to Live Breaks - FORCE ALL AS TEXT, NO AUTO-FORMAT
   const newRow = liveSheet.getLastRow() + 1;
   Logger.log('Adding break to row ' + newRow);
-  // Live Breaks columns: DATE(1), TIME(2), USERNAME(3), BREAK_CODE(4), EXPECTED_DURATION(5), STATUS(6), CHAT_ID(7)
+  // Live Breaks columns: DATE(1), TIME(2), NAME(3), BREAK_CODE(4), EXPECTED_DURATION(5), STATUS(6), CHAT_ID(7)
   liveSheet.getRange(newRow, 1).setValue(today).setNumberFormat('@');  
   liveSheet.getRange(newRow, 2).setValue(timeStr).setNumberFormat('@');  
   liveSheet.getRange(newRow, 3).setValue(username).setNumberFormat('@');
@@ -725,7 +725,7 @@ function handlePunchBack(username, chatId) {
         message = '';
       }
       
-      // Punch Logs columns: DATE(1), TIME_START(2), USERNAME(3), BREAK_CODE(4), TIME_SPENT(5), TIME_END(6), STATUS(7), CHAT_ID(8)
+      // Punch Logs columns: DATE(1), TIME_START(2), NAME(3), BREAK_CODE(4), TIME_SPENT(5), TIME_END(6), STATUS(7), CHAT_ID(8)
       logSheet.getRange(newRow, 1).setValue(today).setNumberFormat('@');
       logSheet.getRange(newRow, 2).setValue(String(breakStartTime)).setNumberFormat('@');
       logSheet.getRange(newRow, 3).setValue(username).setNumberFormat('@');
@@ -856,7 +856,7 @@ function dailyReport() {
   const userBreakCounts = {};
   
   todayRecords.forEach(row => {
-    const username = String(row[2]); // USERNAME
+    const username = String(row[2]); // NAME
     const breakCode = String(row[3]); // BREAK_CODE
     
     // Only count wc, cy, bwc (skip meal breaks cf+1, cf+2, cf+3)

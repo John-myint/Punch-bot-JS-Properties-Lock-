@@ -38,7 +38,7 @@
 ```
 Index 0: DATE
 Index 1: TIME
-Index 2: USERNAME
+Index 2: NAME
 Index 3: BREAK_CODE
 Index 4: EXPECTED_DURATION
 Index 5: STATUS ← Critical
@@ -47,7 +47,7 @@ Index 6: CHAT_ID
 
 **Validation:**
 - ✅ Line 405: `autoPunchBackOvertime()` - `data[i][5]` STATUS check - CORRECT
-- ✅ Line 412: `autoPunchBackOvertime()` - `data[i][2]` USERNAME - CORRECT
+- ✅ Line 412: `autoPunchBackOvertime()` - `data[i][2]` NAME - CORRECT
 - ✅ Line 413: `autoPunchBackOvertime()` - `data[i][3]` BREAK_CODE - CORRECT
 - ✅ Line 414: `autoPunchBackOvertime()` - `data[i][1]` TIME - CORRECT
 - ✅ Line 415: `autoPunchBackOvertime()` - `data[i][4]` EXPECTED_DURATION - CORRECT
@@ -61,7 +61,7 @@ Index 6: CHAT_ID
 ```
 Index 0: DATE
 Index 1: TIME_START
-Index 2: USERNAME
+Index 2: NAME
 Index 3: BREAK_CODE
 Index 4: TIME_SPENT
 Index 5: TIME_END
@@ -72,7 +72,7 @@ Index 7: CHAT_ID
 **Validation:**
 - ✅ Lines 422-429: `autoPunchBackOvertime()` - All 8 column writes in Punch_Logs - CORRECT
 - ✅ Lines 705-712: `handlePunchBack()` - All 8 column writes in Punch_Logs - CORRECT
-- ✅ Line 728: `handlePunchBack()` - `row[2]` USERNAME in dailyReport - CORRECT
+- ✅ Line 728: `handlePunchBack()` - `row[2]` NAME in dailyReport - CORRECT
 - ✅ Line 729: `handlePunchBack()` - `row[3]` BREAK_CODE in dailyReport - CORRECT
 - ✅ Line 730: `handlePunchBack()` - `row[4]` TIME_SPENT in dailyReport - CORRECT
 - ✅ Line 731: `handlePunchBack()` - `row[6]` STATUS in dailyReport - CORRECT

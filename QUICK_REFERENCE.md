@@ -85,7 +85,7 @@ setScriptProperties()    // Set SHEET_ID & BOT_TOKEN
 
 ### Queue Columns
 - TIMESTAMP (when added)
-- USERNAME
+- NAME
 - CHAT_ID  
 - ACTION (BREAK_START, BREAK_END, BREAK_CANCEL)
 - PARAM (break code or empty)
@@ -100,7 +100,7 @@ setScriptProperties()    // Set SHEET_ID & BOT_TOKEN
 
 ### Queue (NEW in v2.1)
 1. TIMESTAMP
-2. USERNAME
+2. NAME
 3. CHAT_ID
 4. ACTION (BREAK_START / BREAK_END / BREAK_CANCEL)
 5. PARAM (break code)
@@ -108,7 +108,7 @@ setScriptProperties()    // Set SHEET_ID & BOT_TOKEN
 ### Live_Breaks
 1. DATE (M/D/YYYY)
 2. TIME (HH:MM:SS)
-3. USERNAME
+3. NAME
 4. BREAK_CODE
 5. EXPECTED_DURATION
 6. STATUS (ON BREAK)
@@ -117,7 +117,7 @@ setScriptProperties()    // Set SHEET_ID & BOT_TOKEN
 ### Punch_Logs
 1. DATE (M/D/YYYY)
 2. TIME_START (HH:MM:SS)
-3. USERNAME
+3. NAME
 4. BREAK_CODE
 5. TIME_SPENT (minutes)
 6. TIME_END (HH:MM:SS)
