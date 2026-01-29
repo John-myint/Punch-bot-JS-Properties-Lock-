@@ -362,7 +362,21 @@ const INVALID_CODE_SARCASM = [
   '❓ Nice keyboard mash. Now try a real code 😌',
   '❓ That ain\'t it, chief 🤏 Try: wc, cy, bwc, cf+1, cf+2, cf+3',
   '❓ I would understand that… if it were correct 😏',
-  '❓ That input belongs in the blooper reel 🎬 Try again!'
+  '❓ That input belongs in the blooper reel 🎬 Try again!',
+  '❓ Are you typing with boxing gloves on? 🥊😆',
+  '❓ That code slipped, tripped, and fell down the stairs 😂',
+  '❓ Even autocorrect gave up on that one 😭',
+  '❓ I see what you were *trying* to do… but no 😌',
+  '❓ That’s not a break code, that’s abstract art 🎨',
+  '❓ Did your cat walk across the keyboard? 🐈‍⬛⌨️',
+  '❓ So close… actually no, not close at all 😆',
+  '❓ I ran that through my brain twice. Still wrong 🧠❌',
+  '❓ That input just punched the wrong buttons 🥊',
+  '❓ Respectfully… what was that? 🤨',
+  '❓ That code needs glasses 👓 Try again!',
+  '❓ Keyboard having a bad day or what? 😅',
+  '❓ I’ve seen better inputs in a panic 😭',
+  '❓ Bold move. Incorrect, but bold 😏'
 ];
 
 // Helper function to get random sarcasm by break type and message type
