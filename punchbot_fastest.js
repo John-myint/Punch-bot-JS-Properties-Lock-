@@ -409,7 +409,7 @@ function saveActiveBreaksToProperties(activeBreaks) {
     const json = JSON.stringify(activeBreaks);
     
     // Check size limit (500KB total for all properties)
-    const sizeKB = new Blob([json]).size / 1024;
+    const sizeKB = json.length / 1024;
     Logger.log('📊 Properties size: ' + sizeKB.toFixed(2) + ' KB');
     
     if (sizeKB > 450) { // Leave 50KB buffer
@@ -968,7 +968,7 @@ function viewSystemStatus() {
     
     // Check size
     const json = JSON.stringify(activeBreaks);
-    const sizeKB = new Blob([json]).size / 1024;
+    const sizeKB = json.length / 1024;
     Logger.log('  Size: ' + sizeKB.toFixed(2) + ' KB / 500 KB');
     Logger.log('  Capacity: ' + ((sizeKB / 500) * 100).toFixed(1) + '%');
     
@@ -1129,10 +1129,15 @@ function parseBreakCode(text) {
 }
 
 function sendTelegramMessage(chatId, text) {
+  const safeText = (text ?? '').toString().trim();
+  if (!safeText) {
+    Logger.log('⚠️ Skipped empty Telegram message. chatId=' + chatId);
+    return;
+  }
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   const payload = {
     chat_id: chatId,
-    text: text,
+    text: safeText,
     parse_mode: 'HTML'
   };
   UrlFetchApp.fetch(url, {
@@ -1140,6 +1145,16 @@ function sendTelegramMessage(chatId, text) {
     payload: JSON.stringify(payload),
     contentType: 'application/json'
   });
+}
+
+/**
+ * Normalize date values to M/D/YYYY
+ */
+function normalizeDate(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'M/d/yyyy');
+  }
+  return String(value).trim();
 }
 
 // ============================================
@@ -1220,9 +1235,9 @@ function autoPunchBackOvertime() {
 function dailyReport() {
   const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
   const now = new Date();
-  const today = getTodayDate();
+  const today = Utilities.formatDate(now, Session.getScriptTimeZone(), 'M/d/yyyy');
   const data = logSheet.getDataRange().getValues();
-  const todayRecords = data.filter((row, idx) => idx > 0 && String(row[0]) === today);
+  const todayRecords = data.slice(1).filter(row => normalizeDate(row[0]) === today);
 
   if (todayRecords.length === 0) {
     return;
@@ -1260,10 +1275,16 @@ function dailyReport() {
   if (breakTypeLeaders.wc.user) report += `🚽 King of Pee (WC): @${breakTypeLeaders.wc.user}\n`;
   if (breakTypeLeaders.cy.user) report += `🚬 King of Smoke (CY): @${breakTypeLeaders.cy.user}\n`;
 
-  const chatIds = new Set(data.map(row => row[7]).filter(Boolean));
+  const chatIds = new Set(
+    todayRecords
+      .map(row => row[7])
+      .filter(id => id && id !== 'CHAT_ID')
+  );
   chatIds.forEach(chatId => {
-    if (chatId) {
+    try {
       sendTelegramMessage(chatId, report);
+    } catch (e) {
+      Logger.log('Daily report failed for chatId ' + chatId + ': ' + e);
     }
   });
 }
@@ -1334,6 +1355,21 @@ function setupTriggers() {
   
   Logger.log('✅ All triggers set up successfully (with Properties + Lock system)!');
   Logger.log('⚡ Performance target: 60 employees in ~2 seconds');
+}
+
+/**
+ * Set script properties from clasp params (no secrets in code).
+ * Usage: clasp run setScriptPropertiesFromParams --params '{"SHEET_ID":"...","BOT_TOKEN":"..."}'
+ */
+function setScriptPropertiesFromParams(params) {
+  const props = PropertiesService.getScriptProperties();
+  if (!params) {
+    Logger.log('No params provided');
+    return;
+  }
+  if (params.SHEET_ID) props.setProperty('SHEET_ID', params.SHEET_ID);
+  if (params.BOT_TOKEN) props.setProperty('BOT_TOKEN', params.BOT_TOKEN);
+  Logger.log('Script properties updated');
 }
 
 // ============================================

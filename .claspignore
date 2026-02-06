@@ -26,8 +26,12 @@ node_modules/
 package.json
 package-lock.json
 
-# Exclude alternative solutions (keep only punchbot_fastest.js)
+# Exclude alternative solutions (deploy fastest)
+punchbot.js
 fast_queue_solution.js
+test_concurrent_load.js
+setup-auto-deploy.sh
+move-to-desktop.sh
 
 # Exclude backup files
 *_old.js
