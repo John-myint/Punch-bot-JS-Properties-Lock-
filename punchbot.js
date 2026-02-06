@@ -74,6 +74,11 @@ function getOrCreateSheet(sheetName) {
 // Back keywords to trigger punch back
 const BACK_KEYWORDS = ['back', 'b', '1', 'btw', 'back to work'];
 
+// Normalize text for command matching (lowercase, strip spaces/punct except '+')
+function normalizeCommandText(text) {
+  return (text || '').toString().toLowerCase().replace(/[^a-z0-9+]/g, '');
+}
+
 // === DIAGNOSTIC FUNCTION ===
 function listAllSheets() {
   Logger.log('=== ALL SHEETS IN SPREADSHEET ===');
@@ -511,7 +516,9 @@ function doPost(e) {
     }
 
     const message = update.message;
-    const text = (message.text || '').toLowerCase().trim();
+    const rawText = message.text || '';
+    const text = rawText.toLowerCase().trim();
+    const compactText = normalizeCommandText(rawText);
     const chatId = message.chat.id;
     const userId = message.from.id;
     // Use actual name instead of username handle
@@ -522,8 +529,15 @@ function doPost(e) {
 
     Logger.log('📬 Telegram message: ' + text + ' from ' + username);
 
-    // Check for punch back keywords first
-    if (BACK_KEYWORDS.includes(text)) {
+    // Check for punch back keywords first (allow spaces/punctuation)
+    if (
+      BACK_KEYWORDS.includes(text) ||
+      compactText === 'b' ||
+      compactText === '1' ||
+      compactText.includes('back') ||
+      compactText.includes('backtowork') ||
+      compactText.includes('btw')
+    ) {
       const result = handlePunchBack(username, chatId);
       if (result.success) {
         const response = `👤 @${username}\n\n${getRandomSarcasm(result.breakCode, 'welcomeBack')}\n\n${result.message}`;
@@ -535,7 +549,7 @@ function doPost(e) {
     }
 
     // Parse break code
-    const breakCode = parseBreakCode(text);
+    const breakCode = parseBreakCode(rawText);
 
     if (breakCode === 'cancel') {
       handleCancel(username, chatId, 0);
@@ -567,11 +581,12 @@ function doPost(e) {
 
 // === PARSE BREAK CODE ===
 function parseBreakCode(text) {
-  // Remove extra spaces and normalize to lowercase
-  const cleanText = text.trim().toLowerCase();
+  // Normalize text for flexible matching
+  const cleanText = normalizeCommandText(text);
+  const cleanTextNoPlus = cleanText.replace(/\+/g, '');
   
-  // Check for cancel keywords (exact match only)
-  if (['c', 'cancel', 'reset'].includes(cleanText)) {
+  // Check for cancel keywords (avoid false positives)
+  if (cleanText === 'c' || cleanText.includes('cancel') || cleanText.includes('reset')) {
     return 'cancel';
   }
   
@@ -580,11 +595,10 @@ function parseBreakCode(text) {
   const sortedCodes = Object.keys(BREAKS).sort((a, b) => b.length - a.length);
   
   for (const code of sortedCodes) {
-    const cleanCode = code.toLowerCase();
+    const normalizedCode = normalizeCommandText(code);
+    const normalizedCodeNoPlus = normalizedCode.replace(/\+/g, '');
     
-    // EXACT MATCH ONLY: Check if the entire text equals the break code
-    // This prevents "bwc+3", "bwcx3", or "bwc cy" from matching
-    if (cleanText === cleanCode) {
+    if (cleanText.includes(normalizedCode) || cleanTextNoPlus.includes(normalizedCodeNoPlus)) {
       return code;
     }
   }
