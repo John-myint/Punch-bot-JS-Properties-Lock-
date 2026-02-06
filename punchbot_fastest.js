@@ -1134,14 +1134,14 @@ function getRandomSarcasm(breakCode, messageType) {
 function parseBreakCode(text) {
   const cleanText = normalizeCommandText(text);
   const cleanTextNoPlus = cleanText.replace(/\+/g, '');
-  if (cleanText === 'c' || cleanText.includes('cancel') || cleanText.includes('reset')) {
+  if (cleanText === 'c' || cleanText === 'cancel' || cleanText === 'reset') {
     return 'cancel';
   }
   const sortedCodes = Object.keys(BREAKS).sort((a, b) => b.length - a.length);
   for (const code of sortedCodes) {
     const normalizedCode = normalizeCommandText(code);
     const normalizedCodeNoPlus = normalizedCode.replace(/\+/g, '');
-    if (cleanText.includes(normalizedCode) || cleanTextNoPlus.includes(normalizedCodeNoPlus)) {
+    if (cleanText === normalizedCode || cleanTextNoPlus === normalizedCodeNoPlus) {
       return code;
     }
   }
