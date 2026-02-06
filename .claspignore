@@ -27,7 +27,7 @@ package.json
 package-lock.json
 
 # Exclude alternative solutions
-punchbot_fastest.js
+punchbot.js
 fast_queue_solution.js
 test_concurrent_load.js
 setup-auto-deploy.sh
