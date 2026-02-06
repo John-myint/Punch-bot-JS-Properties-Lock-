@@ -179,6 +179,14 @@ function processBreakFast(username, breakCode, userId, chatId) {
     
     Logger.log('Daily limit check: ' + dailyCount + '/' + breakConfig.dailyLimit);
     
+    if (limitReached) {
+      Logger.log('❌ Daily limit reached for ' + username + ' (' + breakCode + ')');
+      return {
+        success: false,
+        message: `${getRandomSarcasm(breakCode, 'limitReached')}`
+      };
+    }
+    
     // 3. Add to Properties (FAST - <10ms)
     activeBreaks[username] = {
       breakCode: breakCode,
@@ -200,9 +208,6 @@ function processBreakFast(username, breakCode, userId, chatId) {
     
     // Return response immediately
     let message = `Status: OK | ${dailyCount + 1}/${breakConfig.dailyLimit} used today`;
-    if (limitReached) {
-      message = `${getRandomSarcasm(breakCode, 'limitReached')}`;
-    }
     
     Logger.log('✅ Break processed successfully (fast path)');
     
@@ -636,6 +641,12 @@ function processBreakSlow(username, breakCode, userId, chatId) {
   // Check daily limit
   const dailyCount = getDailyBreakCountFromSheet(username, breakCode, today);
   const limitReached = dailyCount >= breakConfig.dailyLimit;
+  if (limitReached) {
+    return {
+      success: false,
+      message: `${getRandomSarcasm(breakCode, 'limitReached')}`
+    };
+  }
   
   // Write to sheet
   const newRow = liveSheet.getLastRow() + 1;
@@ -643,9 +654,6 @@ function processBreakSlow(username, breakCode, userId, chatId) {
   liveSheet.getRange(newRow, 1, 1, 7).setValues([rowData]).setNumberFormat('@');
   
   let message = `Status: OK | ${dailyCount + 1}/${breakConfig.dailyLimit} used today`;
-  if (limitReached) {
-    message = `${getRandomSarcasm(breakCode, 'limitReached')}`;
-  }
   
   return {
     success: true,
