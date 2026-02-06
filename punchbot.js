@@ -844,18 +844,23 @@ function sendTelegramMessage(chatId, text) {
 }
 
 // === DAILY REPORT (8 PM) ===
+function normalizeDate(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'M/d/yyyy');
+  }
+  return String(value).trim();
+}
+
 function dailyReport() {
   const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
   const now = new Date();
-  const today = (now.getMonth() + 1) + '/' + now.getDate() + '/' + now.getFullYear();
+  const today = Utilities.formatDate(now, Session.getScriptTimeZone(), 'M/d/yyyy');
   
   Logger.log('=== DAILY REPORT ===');
   Logger.log('Today: ' + today);
   
   const data = logSheet.getDataRange().getValues();
-  const todayRecords = data.filter((row, idx) => {
-    return idx > 0 && String(row[0]) === today;
-  });
+  const todayRecords = data.slice(1).filter(row => normalizeDate(row[0]) === today);
 
   Logger.log('Today records found: ' + todayRecords.length);
 
@@ -914,12 +919,18 @@ function dailyReport() {
     report += `🚬 King of Smoke (CY): @${breakTypeLeaders.cy.user}\n`;
   }
 
-  // Send to all chat IDs from Punch Logs
-  const chatIds = new Set(data.map(row => row[7]).filter(Boolean)); // CHAT_ID is at index 7
+  // Send to all chat IDs from today's records only
+  const chatIds = new Set(
+    todayRecords
+      .map(row => row[7]) // CHAT_ID is at index 7
+      .filter(id => id && id !== 'CHAT_ID')
+  );
   chatIds.forEach(chatId => {
-    if (chatId) {
+    try {
       Logger.log('Sending report to chat: ' + chatId);
       sendTelegramMessage(chatId, report);
+    } catch (e) {
+      Logger.log('Daily report failed for chatId ' + chatId + ': ' + e);
     }
   });
 }
