@@ -58,6 +58,13 @@ const PROPERTIES_KEYS = {
 // ============================================
 
 /**
+ * Normalize text for command matching (lowercase, strip spaces/punct except '+')
+ */
+function normalizeCommandText(text) {
+  return (text || '').toString().toLowerCase().replace(/[^a-z0-9+]/g, '');
+}
+
+/**
  * Main webhook handler (OPTIMIZED)
  */
 function doPost(e) {
@@ -71,7 +78,9 @@ function doPost(e) {
     }
 
     const message = update.message;
-    const text = (message.text || '').toLowerCase().trim();
+    const rawText = message.text || '';
+    const text = rawText.toLowerCase().trim();
+    const compactText = normalizeCommandText(rawText);
     const chatId = message.chat.id;
     const userId = message.from.id;
     const firstName = message.from.first_name || '';
@@ -80,8 +89,8 @@ function doPost(e) {
 
     Logger.log('📬 Request from: ' + username + ' | Text: ' + text);
 
-    // Check for punch back keywords
-    if (BACK_KEYWORDS.includes(text)) {
+    // Check for punch back keywords (allow spaces/punctuation)
+    if (BACK_KEYWORDS.includes(text) || ['back', 'b', '1', 'btw', 'backtowork'].includes(compactText)) {
       const result = handlePunchBackFast(username, chatId);
       const responseMsg = result.success 
         ? `👤 @${username}\n\n${getRandomSarcasm(result.breakCode, 'welcomeBack')}\n\n${result.message}`
@@ -93,7 +102,7 @@ function doPost(e) {
     }
 
     // Parse break code
-    const breakCode = parseBreakCode(text);
+    const breakCode = parseBreakCode(rawText);
 
     if (breakCode === 'cancel') {
       handleCancelFast(username, chatId);
@@ -1115,13 +1124,14 @@ function getRandomSarcasm(breakCode, messageType) {
 }
 
 function parseBreakCode(text) {
-  const cleanText = text.trim().toLowerCase();
+  const cleanText = normalizeCommandText(text);
   if (['c', 'cancel', 'reset'].includes(cleanText)) {
     return 'cancel';
   }
   const sortedCodes = Object.keys(BREAKS).sort((a, b) => b.length - a.length);
   for (const code of sortedCodes) {
-    if (cleanText === code.toLowerCase()) {
+    const normalizedCode = normalizeCommandText(code);
+    if (cleanText === normalizedCode) {
       return code;
     }
   }
