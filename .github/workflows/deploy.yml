@@ -5,10 +5,8 @@ on:
     branches:
       - main  # Deploy when pushing to main branch
     paths:
-      - 'punchbot_fastest.js'
       - 'punchbot.js'
       - 'appsscript.json'
-      - 'test_concurrent_load.js'
       - '.github/workflows/deploy.yml'
   
   workflow_dispatch:  # Allow manual trigger from GitHub UI
@@ -50,13 +48,13 @@ jobs:
           echo "🔍 Validating files before deployment..."
           
           # Check if main file exists
-          if [ ! -f "punchbot_fastest.js" ]; then
-            echo "❌ Error: punchbot_fastest.js not found!"
+          if [ ! -f "punchbot.js" ]; then
+            echo "❌ Error: punchbot.js not found!"
             exit 1
           fi
           
           # Check JavaScript syntax
-          node --check punchbot_fastest.js
+          node --check punchbot.js
           echo "✅ Syntax check passed"
           
           # Show files to be deployed
