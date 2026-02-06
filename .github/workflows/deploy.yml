@@ -31,9 +31,11 @@ jobs:
           echo "✅ clasp installed: $(clasp --version)"
       
       - name: Configure clasp credentials
+        env:
+          CLASP_TOKEN: ${{ secrets.CLASP_TOKEN }}
         run: |
           echo "🔐 Setting up credentials..."
-          echo '${{ secrets.CLASP_TOKEN }}' > ~/.clasprc.json
+          printf '%s' "$CLASP_TOKEN" > ~/.clasprc.json
           echo "✅ Credentials configured"
       
       - name: Configure project
