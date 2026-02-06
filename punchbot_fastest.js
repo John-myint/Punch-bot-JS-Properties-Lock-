@@ -571,16 +571,21 @@ function getDailyBreakCountFromSheet(userKey, breakCode, today, displayName) {
   try {
     const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
     const data = logSheet.getDataRange().getValues();
+    const headerMap = getHeaderMap(logSheet);
+    const dateIdx = getColumnIndex(headerMap, 'DATE', 0);
+    const nameIdx = getColumnIndex(headerMap, 'NAME', 2);
+    const breakIdx = getColumnIndex(headerMap, 'BREAK_CODE', 3);
+    const userIdIdx = getColumnIndex(headerMap, 'USER_ID', 8);
     
     const count = data.filter((row, idx) => {
-      const rowUserId = row.length > 8 ? String(row[8]) : '';
+      const rowUserId = userIdIdx !== undefined && row.length > userIdIdx ? String(row[userIdIdx]) : '';
       const userMatches = rowUserId
         ? rowUserId === String(userKey)
-        : String(row[2]) === String(displayName);
+        : String(row[nameIdx]) === String(displayName);
       return idx > 0 && 
-             String(row[0]) === today && 
+             String(row[dateIdx]) === today && 
              userMatches && 
-             String(row[3]) === breakCode;
+             String(row[breakIdx]) === breakCode;
     }).length;
     
     Logger.log('📊 Sheet count for ' + displayName + ' ' + breakCode + ': ' + count);
@@ -602,11 +607,16 @@ function getDailyBreakCountFromSheet(userKey, breakCode, today, displayName) {
 function writeBreakToSheetAsync(userKey, displayName, breakCode, duration, today, timeStr, chatId) {
   try {
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
-    const newRow = liveSheet.getLastRow() + 1;
-    
-    // Single batch write (8 columns)
-    const rowData = [today, timeStr, displayName, breakCode, duration, 'ON BREAK', String(chatId), String(userKey)];
-    liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+    appendRowByHeaders(liveSheet, {
+      DATE: today,
+      TIME: timeStr,
+      NAME: displayName,
+      BREAK_CODE: breakCode,
+      EXPECTED_DURATION: duration,
+      STATUS: 'ON BREAK',
+      CHAT_ID: String(chatId),
+      USER_ID: String(userKey)
+    });
     
     Logger.log('✅ Break written to Live_Breaks (async)');
     
@@ -622,13 +632,20 @@ function writeBreakToSheetAsync(userKey, displayName, breakCode, duration, today
 function writePunchLogAsync(userKey, displayName, breakCode, today, startTime, endTime, actualMinutes, expectedDuration, chatId) {
   try {
     const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
-    const newRow = logSheet.getLastRow() + 1;
     
     let status = actualMinutes > expectedDuration ? '⚠️ OVER TIME' : '✅ OK';
     
-    // Single batch write (9 columns)
-    const rowData = [today, startTime, displayName, breakCode, actualMinutes, endTime, status, String(chatId), String(userKey)];
-    logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
+    appendRowByHeaders(logSheet, {
+      DATE: today,
+      TIME_START: startTime,
+      NAME: displayName,
+      BREAK_CODE: breakCode,
+      TIME_SPENT: actualMinutes,
+      TIME_END: endTime,
+      STATUS: status,
+      CHAT_ID: String(chatId),
+      USER_ID: String(userKey)
+    });
     
     Logger.log('✅ Punch log written to Punch_Logs (async)');
     
@@ -644,12 +661,16 @@ function deleteFromLiveBreaksAsync(userKey, displayName, today) {
   try {
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
     const data = liveSheet.getDataRange().getValues();
+    const headerMap = getHeaderMap(liveSheet);
+    const dateIdx = getColumnIndex(headerMap, 'DATE', 0);
+    const nameIdx = getColumnIndex(headerMap, 'NAME', 2);
+    const userIdIdx = getColumnIndex(headerMap, 'USER_ID', 7);
     
     // Find and delete user's break
     for (let i = data.length - 1; i >= 1; i--) {
-      const rowDate = String(data[i][0]);
-      const rowUser = String(data[i][2]);
-      const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+      const rowDate = String(data[i][dateIdx]);
+      const rowUser = String(data[i][nameIdx]);
+      const rowUserId = userIdIdx !== undefined && data[i].length > userIdIdx ? String(data[i][userIdIdx]) : '';
       
       const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
       
@@ -676,6 +697,14 @@ function processBreakSlow(userKey, displayName, breakCode, chatId) {
   Logger.log('⚠️ Using SLOW path (sheet-based processing)');
   
   const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
+  const headerMap = getHeaderMap(liveSheet);
+  const dateIdx = getColumnIndex(headerMap, 'DATE', 0);
+  const timeIdx = getColumnIndex(headerMap, 'TIME', 1);
+  const nameIdx = getColumnIndex(headerMap, 'NAME', 2);
+  const breakIdx = getColumnIndex(headerMap, 'BREAK_CODE', 3);
+  const durationIdx = getColumnIndex(headerMap, 'EXPECTED_DURATION', 4);
+  const statusIdx = getColumnIndex(headerMap, 'STATUS', 5);
+  const userIdIdx = getColumnIndex(headerMap, 'USER_ID', 7);
   const now = new Date();
   const today = getTodayDate();
   const timeStr = getTimeString(now);
@@ -684,16 +713,16 @@ function processBreakSlow(userKey, displayName, breakCode, chatId) {
   // Check for active break
   const data = liveSheet.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = String(data[i][0]);
-    const rowUser = String(data[i][2]);
-    const rowStatus = String(data[i][5]);
-    const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+    const rowDate = String(data[i][dateIdx]);
+    const rowUser = String(data[i][nameIdx]);
+    const rowStatus = String(data[i][statusIdx]);
+    const rowUserId = userIdIdx !== undefined && data[i].length > userIdIdx ? String(data[i][userIdIdx]) : '';
     const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
     
     if (rowDate === today && userMatches && rowStatus === 'ON BREAK') {
       return {
         success: false,
-        message: `🤨 You already have an active break!\n\nActive: ${data[i][3]} (${data[i][1]})\n\nType "back" to close it first!`
+        message: `🤨 You already have an active break!\n\nActive: ${data[i][breakIdx]} (${data[i][timeIdx]})\n\nType "back" to close it first!`
       };
     }
   }
@@ -703,9 +732,16 @@ function processBreakSlow(userKey, displayName, breakCode, chatId) {
   const limitReached = dailyCount >= breakConfig.dailyLimit;
   
   // Write to sheet
-  const newRow = liveSheet.getLastRow() + 1;
-  const rowData = [today, timeStr, displayName, breakCode, breakConfig.duration, 'ON BREAK', String(chatId), String(userKey)];
-  liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+  appendRowByHeaders(liveSheet, {
+    DATE: today,
+    TIME: timeStr,
+    NAME: displayName,
+    BREAK_CODE: breakCode,
+    EXPECTED_DURATION: breakConfig.duration,
+    STATUS: 'ON BREAK',
+    CHAT_ID: String(chatId),
+    USER_ID: String(userKey)
+  });
   
   let message = `Status: OK | ${dailyCount + 1}/${breakConfig.dailyLimit} used today`;
   if (limitReached) {
@@ -726,6 +762,14 @@ function handlePunchBackSlow(userKey, displayName, chatId) {
   
   const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
   const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
+  const liveHeaderMap = getHeaderMap(liveSheet);
+  const liveDateIdx = getColumnIndex(liveHeaderMap, 'DATE', 0);
+  const liveTimeIdx = getColumnIndex(liveHeaderMap, 'TIME', 1);
+  const liveNameIdx = getColumnIndex(liveHeaderMap, 'NAME', 2);
+  const liveBreakIdx = getColumnIndex(liveHeaderMap, 'BREAK_CODE', 3);
+  const liveDurationIdx = getColumnIndex(liveHeaderMap, 'EXPECTED_DURATION', 4);
+  const liveStatusIdx = getColumnIndex(liveHeaderMap, 'STATUS', 5);
+  const liveUserIdIdx = getColumnIndex(liveHeaderMap, 'USER_ID', 7);
   const now = new Date();
   const today = getTodayDate();
   const timeStr = getTimeString(now);
@@ -733,16 +777,16 @@ function handlePunchBackSlow(userKey, displayName, chatId) {
   const data = liveSheet.getDataRange().getValues();
   
   for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = String(data[i][0]);
-    const rowUser = String(data[i][2]);
-    const rowStatus = String(data[i][5]);
-    const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+    const rowDate = String(data[i][liveDateIdx]);
+    const rowUser = String(data[i][liveNameIdx]);
+    const rowStatus = String(data[i][liveStatusIdx]);
+    const rowUserId = liveUserIdIdx !== undefined && data[i].length > liveUserIdIdx ? String(data[i][liveUserIdIdx]) : '';
     const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
     
     if (rowDate === today && userMatches && rowStatus === 'ON BREAK') {
-      const breakStartTime = data[i][1];
-      const expectedDuration = data[i][4];
-      const breakCode = data[i][3];
+      const breakStartTime = data[i][liveTimeIdx];
+      const expectedDuration = data[i][liveDurationIdx];
+      const breakCode = data[i][liveBreakIdx];
       
       const start = new Date('1970/01/01 ' + breakStartTime);
       const end = new Date('1970/01/01 ' + timeStr);
@@ -753,10 +797,18 @@ function handlePunchBackSlow(userKey, displayName, chatId) {
       }
       
       // Write to Punch_Logs
-      const newRow = logSheet.getLastRow() + 1;
       const status = actualMinutes > expectedDuration ? '⚠️ OVER TIME' : '✅ OK';
-      const rowData = [today, breakStartTime, displayName, breakCode, actualMinutes, timeStr, status, String(chatId), String(userKey)];
-      logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
+      appendRowByHeaders(logSheet, {
+        DATE: today,
+        TIME_START: breakStartTime,
+        NAME: displayName,
+        BREAK_CODE: breakCode,
+        TIME_SPENT: actualMinutes,
+        TIME_END: timeStr,
+        STATUS: status,
+        CHAT_ID: String(chatId),
+        USER_ID: String(userKey)
+      });
       
       // Delete from Live_Breaks
       liveSheet.deleteRow(i + 1);
@@ -806,6 +858,11 @@ function syncPropertiesToSheets() {
     const activeBreaks = getActiveBreaksFromProperties();
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
     const data = liveSheet.getDataRange().getValues();
+    const headerMap = getHeaderMap(liveSheet);
+    const dateIdx = getColumnIndex(headerMap, 'DATE', 0);
+    const nameIdx = getColumnIndex(headerMap, 'NAME', 2);
+    const statusIdx = getColumnIndex(headerMap, 'STATUS', 5);
+    const userIdIdx = getColumnIndex(headerMap, 'USER_ID', 7);
     
     let synced = 0;
     let added = 0;
@@ -820,10 +877,10 @@ function syncPropertiesToSheets() {
       // Check if exists in sheet
       let found = false;
       for (let i = 1; i < data.length; i++) {
-        const rowUser = String(data[i][2]);
-        const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+        const rowUser = String(data[i][nameIdx]);
+        const rowUserId = userIdIdx !== undefined && data[i].length > userIdIdx ? String(data[i][userIdIdx]) : '';
         const userMatches = rowUserId ? rowUserId === userId : rowUser === displayName;
-        if (userMatches && String(data[i][0]) === breakInfo.startDate) {
+        if (userMatches && String(data[i][dateIdx]) === breakInfo.startDate) {
           found = true;
           synced++;
           break;
@@ -833,17 +890,16 @@ function syncPropertiesToSheets() {
       if (!found) {
         // Add to sheet
         const newRow = liveSheet.getLastRow() + 1;
-        const rowData = [
-          breakInfo.startDate,
-          breakInfo.startTime,
-          displayName,
-          breakInfo.breakCode,
-          breakInfo.expectedDuration,
-          'ON BREAK',
-          breakInfo.chatId,
-          userId
-        ];
-        liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+        appendRowByHeaders(liveSheet, {
+          DATE: breakInfo.startDate,
+          TIME: breakInfo.startTime,
+          NAME: displayName,
+          BREAK_CODE: breakInfo.breakCode,
+          EXPECTED_DURATION: breakInfo.expectedDuration,
+          STATUS: 'ON BREAK',
+          CHAT_ID: breakInfo.chatId,
+          USER_ID: userId
+        });
         added++;
         Logger.log('➕ Added to sheet: ' + displayName);
       }
@@ -852,12 +908,12 @@ function syncPropertiesToSheets() {
     // 2. Check Sheet → Properties (remove orphans)
     const today = getTodayDate();
     for (let i = data.length - 1; i >= 1; i--) {
-      const rowDate = String(data[i][0]);
-      const rowUser = String(data[i][2]);
-      const rowStatus = String(data[i][5]);
+      const rowDate = String(data[i][dateIdx]);
+      const rowUser = String(data[i][nameIdx]);
+      const rowStatus = String(data[i][statusIdx]);
       
       if (rowDate === today && rowStatus === 'ON BREAK') {
-        const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+        const rowUserId = userIdIdx !== undefined && data[i].length > userIdIdx ? String(data[i][userIdIdx]) : '';
         const hasEntry = rowUserId
           ? (activeBreaks[rowUserId] || activeBreaks[rowUser])
           : activeBreaks[rowUser];
@@ -900,28 +956,37 @@ function loadPropertiesFromSheets() {
   try {
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
     const data = liveSheet.getDataRange().getValues();
+    const headerMap = getHeaderMap(liveSheet);
+    const dateIdx = getColumnIndex(headerMap, 'DATE', 0);
+    const timeIdx = getColumnIndex(headerMap, 'TIME', 1);
+    const nameIdx = getColumnIndex(headerMap, 'NAME', 2);
+    const breakIdx = getColumnIndex(headerMap, 'BREAK_CODE', 3);
+    const durationIdx = getColumnIndex(headerMap, 'EXPECTED_DURATION', 4);
+    const statusIdx = getColumnIndex(headerMap, 'STATUS', 5);
+    const chatIdx = getColumnIndex(headerMap, 'CHAT_ID', 6);
+    const userIdIdx = getColumnIndex(headerMap, 'USER_ID', 7);
     const today = getTodayDate();
     const activeBreaks = {};
     
     let loaded = 0;
     
     for (let i = 1; i < data.length; i++) {
-      const rowDate = String(data[i][0]);
-      const rowStatus = String(data[i][5]);
+      const rowDate = String(data[i][dateIdx]);
+      const rowStatus = String(data[i][statusIdx]);
       
       if (rowDate === today && rowStatus === 'ON BREAK') {
-        const username = String(data[i][2]);
-        const userId = data[i].length > 7 ? String(data[i][7]) : '';
+        const username = String(data[i][nameIdx]);
+        const userId = userIdIdx !== undefined && data[i].length > userIdIdx ? String(data[i][userIdIdx]) : '';
         const userKey = userId ? userId : username;
         
         activeBreaks[userKey] = {
           userId: userId || userKey,
           username: username,
-          breakCode: String(data[i][3]),
-          startTime: String(data[i][1]),
+          breakCode: String(data[i][breakIdx]),
+          startTime: String(data[i][timeIdx]),
           startDate: rowDate,
-          expectedDuration: parseInt(data[i][4]),
-          chatId: String(data[i][6]),
+          expectedDuration: parseInt(data[i][durationIdx]),
+          chatId: String(data[i][chatIdx]),
           timestamp: new Date().getTime()
         };
         
@@ -1140,21 +1205,64 @@ function getOrCreateSheet(sheetName) {
   }
   
   if (sheetName === LIVE_BREAKS_SHEET || sheetName === PUNCH_LOG_SHEET) {
-    ensureUserIdColumn(sheet);
+    const required = sheetName === LIVE_BREAKS_SHEET
+      ? ['DATE', 'TIME', 'NAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID', 'USER_ID']
+      : ['DATE', 'TIME_START', 'NAME', 'BREAK_CODE', 'TIME_SPENT', 'TIME_END', 'STATUS', 'CHAT_ID', 'USER_ID'];
+    ensureColumns(sheet, required);
   }
   
   return sheet;
 }
 
-function ensureUserIdColumn(sheet) {
+function getHeaderMap(sheet) {
   const lastCol = sheet.getLastColumn();
   if (lastCol < 1) {
-    return;
+    return {};
   }
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  if (!headers.includes('USER_ID')) {
-    sheet.getRange(1, headers.length + 1).setValue('USER_ID');
-  }
+  const map = {};
+  headers.forEach((header, idx) => {
+    const key = String(header || '').trim();
+    if (key) {
+      map[key] = idx;
+    }
+  });
+  return map;
+}
+
+function ensureColumns(sheet, requiredHeaders) {
+  const lastCol = sheet.getLastColumn();
+  const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const existing = new Set(headers.map(h => String(h || '').trim()).filter(Boolean));
+  let nextCol = headers.length + 1;
+  requiredHeaders.forEach(header => {
+    if (!existing.has(header)) {
+      sheet.getRange(1, nextCol).setValue(header);
+      existing.add(header);
+      nextCol++;
+    }
+  });
+  return getHeaderMap(sheet);
+}
+
+function getColumnIndex(headerMap, headerName, fallbackIndex) {
+  const idx = headerMap[headerName];
+  return idx === undefined ? fallbackIndex : idx;
+}
+
+function appendRowByHeaders(sheet, valuesByHeader) {
+  const headerMap = ensureColumns(sheet, Object.keys(valuesByHeader));
+  const lastCol = sheet.getLastColumn();
+  const row = new Array(lastCol).fill('');
+  Object.keys(valuesByHeader).forEach(header => {
+    const idx = headerMap[header];
+    if (idx !== undefined) {
+      row[idx] = valuesByHeader[header];
+    }
+  });
+  const newRow = sheet.getLastRow() + 1;
+  sheet.getRange(newRow, 1, 1, lastCol).setValues([row]).setNumberFormat('@');
+  return newRow;
 }
 
 // ============================================
@@ -1276,6 +1384,15 @@ function normalizeDate(value) {
 function autoPunchBackOvertime() {
   const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
   const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
+  const liveHeaderMap = getHeaderMap(liveSheet);
+  const liveDateIdx = getColumnIndex(liveHeaderMap, 'DATE', 0);
+  const liveTimeIdx = getColumnIndex(liveHeaderMap, 'TIME', 1);
+  const liveNameIdx = getColumnIndex(liveHeaderMap, 'NAME', 2);
+  const liveBreakIdx = getColumnIndex(liveHeaderMap, 'BREAK_CODE', 3);
+  const liveDurationIdx = getColumnIndex(liveHeaderMap, 'EXPECTED_DURATION', 4);
+  const liveStatusIdx = getColumnIndex(liveHeaderMap, 'STATUS', 5);
+  const liveChatIdx = getColumnIndex(liveHeaderMap, 'CHAT_ID', 6);
+  const liveUserIdIdx = getColumnIndex(liveHeaderMap, 'USER_ID', 7);
   const now = new Date();
   const today = getTodayDate();
   const currentTimeStr = getTimeString(now);
@@ -1284,16 +1401,16 @@ function autoPunchBackOvertime() {
   const rowsToDelete = [];
   
   for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = String(data[i][0]);
-    const rowStatus = String(data[i][5]);
+    const rowDate = String(data[i][liveDateIdx]);
+    const rowStatus = String(data[i][liveStatusIdx]);
     
     if (rowDate === today && rowStatus === 'ON BREAK') {
-      const username = data[i][2];
-      const breakCode = data[i][3];
-      const breakStartTime = String(data[i][1]);
-      const expectedDuration = parseInt(data[i][4]);
-      const chatId = data[i][6];
-      const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+      const username = data[i][liveNameIdx];
+      const breakCode = data[i][liveBreakIdx];
+      const breakStartTime = String(data[i][liveTimeIdx]);
+      const expectedDuration = parseInt(data[i][liveDurationIdx]);
+      const chatId = data[i][liveChatIdx];
+      const rowUserId = liveUserIdIdx !== undefined && data[i].length > liveUserIdIdx ? String(data[i][liveUserIdIdx]) : '';
       const userKey = rowUserId ? rowUserId : String(username);
       
       const startParts = breakStartTime.split(':');
@@ -1311,9 +1428,17 @@ function autoPunchBackOvertime() {
       
       if (elapsedMinutes > expectedDuration + 5) {
         // Write to Punch_Logs
-        const newRow = logSheet.getLastRow() + 1;
-        const rowData = [today, breakStartTime, username, breakCode, elapsedMinutes, currentTimeStr, '⚠️ AUTO PUNCHED', String(chatId), String(userKey)];
-        logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
+        appendRowByHeaders(logSheet, {
+          DATE: today,
+          TIME_START: breakStartTime,
+          NAME: String(username),
+          BREAK_CODE: breakCode,
+          TIME_SPENT: elapsedMinutes,
+          TIME_END: currentTimeStr,
+          STATUS: '⚠️ AUTO PUNCHED',
+          CHAT_ID: String(chatId),
+          USER_ID: String(userKey)
+        });
         
         rowsToDelete.push(i + 1);
         
