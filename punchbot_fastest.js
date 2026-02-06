@@ -16,16 +16,29 @@
 
 // Get properties from Script Properties Service
 const props = PropertiesService.getScriptProperties();
-const SHEET_ID = props.getProperty('SHEET_ID') || '1HIPZ0dHt_wYJygi0W3_64iDQzFr_y2YwVFcdGgj4bxA';
-const BOT_TOKEN = props.getProperty('BOT_TOKEN') || '8479664759:AAFn36OFdr5G_-EK_RVaZjDj7F9JfbAEVOA';
+const SHEET_ID = props.getProperty('SHEET_ID');
+const BOT_TOKEN = props.getProperty('BOT_TOKEN');
+
+function requireConfig() {
+  if (!SHEET_ID) {
+    throw new Error('Missing SHEET_ID in Script Properties');
+  }
+  if (!BOT_TOKEN) {
+    throw new Error('Missing BOT_TOKEN in Script Properties');
+  }
+}
 
 // Auto-set timezone to Dubai on script initialization
-try {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
-  spreadsheet.setSpreadsheetTimeZone('Asia/Dubai');
-  Logger.log('✓ Timezone auto-set to Dubai (Asia/Dubai) on script load');
-} catch (e) {
-  Logger.log('⚠️ Timezone auto-set skipped: ' + e);
+if (SHEET_ID) {
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    spreadsheet.setSpreadsheetTimeZone('Asia/Dubai');
+    Logger.log('✓ Timezone auto-set to Dubai (Asia/Dubai) on script load');
+  } catch (e) {
+    Logger.log('⚠️ Timezone auto-set skipped: ' + e);
+  }
+} else {
+  Logger.log('⚠️ SHEET_ID not set; timezone auto-set skipped');
 }
 
 // Break configurations
@@ -69,8 +82,11 @@ function normalizeCommandText(text) {
  */
 function doPost(e) {
   const requestStartTime = new Date();
+  let safeText = '';
+  let safeUsername = 'Unknown';
   
   try {
+    requireConfig();
     const update = JSON.parse(e.postData.contents);
     
     if (!update.message) {
@@ -82,16 +98,18 @@ function doPost(e) {
     const text = rawText.toLowerCase().trim();
     const compactText = normalizeCommandText(rawText);
     const chatId = message.chat.id;
-    const userId = message.from.id;
     const firstName = message.from.first_name || '';
     const lastName = message.from.last_name || '';
     const username = (firstName + ' ' + lastName).trim() || message.from.username || 'Anonymous';
+    const userKey = String(message.from.id);
+    safeText = text;
+    safeUsername = username;
 
     Logger.log('📬 Request from: ' + username + ' | Text: ' + text);
 
     // Check for punch back keywords (allow spaces/punctuation)
     if (BACK_KEYWORDS.includes(text) || ['back', 'b', '1', 'btw', 'backtowork'].includes(compactText)) {
-      const result = handlePunchBackFast(username, chatId);
+      const result = handlePunchBackFast(userKey, username, chatId);
       const responseMsg = result.success 
         ? `👤 @${username}\n\n${getRandomSarcasm(result.breakCode, 'welcomeBack')}\n\n${result.message}`
         : `👤 @${username}\n\n${result.message}`;
@@ -105,7 +123,7 @@ function doPost(e) {
     const breakCode = parseBreakCode(rawText);
 
     if (breakCode === 'cancel') {
-      handleCancelFast(username, chatId);
+      handleCancelFast(userKey, username, chatId);
       logPerformance('CANCEL', requestStartTime);
       return HtmlService.createHtmlOutput('ok');
     }
@@ -117,7 +135,7 @@ function doPost(e) {
     }
 
     // Process break (FAST!)
-    const result = processBreakFast(username, breakCode, userId, chatId);
+    const result = processBreakFast(userKey, username, breakCode, chatId);
     
     if (result.success) {
       const response = `👤 @${username}\n\n${getRandomSarcasm(breakCode, 'breakStarted')}\n\n⏱️ ${BREAKS[breakCode].name} (${BREAKS[breakCode].duration} min)\n📊 ${result.message}`;
@@ -132,7 +150,7 @@ function doPost(e) {
     
   } catch (error) {
     Logger.log('❌ Error in doPost: ' + error);
-    logError('doPost', error, { text: text, username: username });
+    logError('doPost', error, { text: safeText, username: safeUsername });
     return HtmlService.createHtmlOutput('error: ' + error);
   }
 }
@@ -140,7 +158,7 @@ function doPost(e) {
 /**
  * Process break using Properties (FASTEST)
  */
-function processBreakFast(username, breakCode, userId, chatId) {
+function processBreakFast(userKey, displayName, breakCode, chatId) {
   const lock = LockService.getScriptLock();
   
   try {
@@ -159,13 +177,27 @@ function processBreakFast(username, breakCode, userId, chatId) {
     const breakConfig = BREAKS[breakCode];
     
     Logger.log('=== PROCESS BREAK FAST ===');
-    Logger.log('Username: ' + username + ' | Break: ' + breakCode);
+    Logger.log('Username: ' + displayName + ' | UserId: ' + userKey + ' | Break: ' + breakCode);
     
     // 1. Check active breaks in Properties (FAST - <5ms)
     const activeBreaks = getActiveBreaksFromProperties();
     
-    if (activeBreaks[username]) {
-      const existing = activeBreaks[username];
+    let existing = activeBreaks[userKey];
+    let legacyKey = null;
+    if (!existing && activeBreaks[displayName]) {
+      existing = activeBreaks[displayName];
+      legacyKey = displayName;
+    }
+    
+    if (existing) {
+      if (legacyKey) {
+        activeBreaks[userKey] = Object.assign({}, existing, {
+          userId: userKey,
+          username: displayName
+        });
+        delete activeBreaks[legacyKey];
+        saveActiveBreaksToProperties(activeBreaks);
+      }
       Logger.log('❌ User already has active break: ' + existing.breakCode);
       return {
         success: false,
@@ -174,7 +206,7 @@ function processBreakFast(username, breakCode, userId, chatId) {
     }
     
     // 2. Check daily limit from cache (FAST - <10ms)
-    const dailyCount = getDailyBreakCountFast(username, breakCode, today);
+    const dailyCount = getDailyBreakCountFast(userKey, breakCode, today, displayName);
     const limitReached = dailyCount >= breakConfig.dailyLimit;
     
     Logger.log('Daily limit check: ' + dailyCount + '/' + breakConfig.dailyLimit);
@@ -183,7 +215,9 @@ function processBreakFast(username, breakCode, userId, chatId) {
     }
     
     // 3. Add to Properties (FAST - <10ms)
-    activeBreaks[username] = {
+    activeBreaks[userKey] = {
+      userId: userKey,
+      username: displayName,
       breakCode: breakCode,
       startTime: timeStr,
       startDate: today,
@@ -196,10 +230,10 @@ function processBreakFast(username, breakCode, userId, chatId) {
     Logger.log('✅ Break added to Properties');
     
     // 4. Increment daily counter in cache (FAST - <10ms)
-    incrementDailyBreakCount(username, breakCode, today);
+    incrementDailyBreakCount(userKey, breakCode, today, displayName);
     
     // 5. Write to sheet in background (ASYNC - don't wait)
-    writeBreakToSheetAsync(username, breakCode, breakConfig.duration, today, timeStr, chatId);
+    writeBreakToSheetAsync(userKey, displayName, breakCode, breakConfig.duration, today, timeStr, chatId);
     
     // Return response immediately
     let message = `Status: OK | ${dailyCount + 1}/${breakConfig.dailyLimit} used today`;
@@ -216,11 +250,11 @@ function processBreakFast(username, breakCode, userId, chatId) {
     
   } catch (error) {
     Logger.log('❌ Error in processBreakFast: ' + error);
-    logError('processBreakFast', error, { username, breakCode });
+    logError('processBreakFast', error, { username: displayName, breakCode });
     
     // Fallback to slow but safe sheet-based processing
     Logger.log('⚠️ Falling back to sheet-based processing');
-    return processBreakSlow(username, breakCode, userId, chatId);
+    return processBreakSlow(userKey, displayName, breakCode, chatId);
     
   } finally {
     lock.releaseLock();
@@ -230,7 +264,7 @@ function processBreakFast(username, breakCode, userId, chatId) {
 /**
  * Handle punch back using Properties (FASTEST)
  */
-function handlePunchBackFast(username, chatId) {
+function handlePunchBackFast(userKey, displayName, chatId) {
   const lock = LockService.getScriptLock();
   
   try {
@@ -247,12 +281,19 @@ function handlePunchBackFast(username, chatId) {
     const timeStr = getTimeString(now);
     
     Logger.log('=== PUNCH BACK FAST ===');
-    Logger.log('Username: ' + username);
+    Logger.log('Username: ' + displayName + ' | UserId: ' + userKey);
     
     // 1. Get active break from Properties (FAST - <5ms)
     const activeBreaks = getActiveBreaksFromProperties();
     
-    if (!activeBreaks[username]) {
+    let breakInfo = activeBreaks[userKey];
+    let legacyKey = null;
+    if (!breakInfo && activeBreaks[displayName]) {
+      breakInfo = activeBreaks[displayName];
+      legacyKey = displayName;
+    }
+    
+    if (!breakInfo) {
       Logger.log('❌ No active break found in Properties');
       
       const noBreakMessages = [
@@ -269,7 +310,6 @@ function handlePunchBackFast(username, chatId) {
       };
     }
     
-    const breakInfo = activeBreaks[username];
     const breakCode = breakInfo.breakCode;
     const startTime = breakInfo.startTime;
     const expectedDuration = breakInfo.expectedDuration;
@@ -286,15 +326,18 @@ function handlePunchBackFast(username, chatId) {
     Logger.log('Break duration: ' + actualMinutes + ' min (expected: ' + expectedDuration + ' min)');
     
     // 3. Remove from Properties (FAST - <10ms)
-    delete activeBreaks[username];
+    if (legacyKey) {
+      delete activeBreaks[legacyKey];
+    }
+    delete activeBreaks[userKey];
     saveActiveBreaksToProperties(activeBreaks);
     Logger.log('✅ Break removed from Properties');
     
     // 4. Write to Punch_Logs in background (ASYNC)
-    writePunchLogAsync(username, breakCode, today, startTime, timeStr, actualMinutes, expectedDuration, chatId);
+    writePunchLogAsync(userKey, displayName, breakCode, today, startTime, timeStr, actualMinutes, expectedDuration, chatId);
     
     // 5. Delete from Live_Breaks in background (ASYNC)
-    deleteFromLiveBreaksAsync(username, today);
+    deleteFromLiveBreaksAsync(userKey, displayName, today);
     
     // Return response immediately
     let status, message;
@@ -322,11 +365,11 @@ function handlePunchBackFast(username, chatId) {
     
   } catch (error) {
     Logger.log('❌ Error in handlePunchBackFast: ' + error);
-    logError('handlePunchBackFast', error, { username });
+    logError('handlePunchBackFast', error, { username: displayName });
     
     // Fallback to slow sheet-based processing
     Logger.log('⚠️ Falling back to sheet-based processing');
-    return handlePunchBackSlow(username, chatId);
+    return handlePunchBackSlow(userKey, displayName, chatId);
     
   } finally {
     lock.releaseLock();
@@ -336,50 +379,60 @@ function handlePunchBackFast(username, chatId) {
 /**
  * Handle cancel using Properties (FASTEST)
  */
-function handleCancelFast(username, chatId) {
+function handleCancelFast(userKey, displayName, chatId) {
   const lock = LockService.getScriptLock();
   
   try {
     if (!lock.tryLock(5000)) {
-      sendTelegramMessage(chatId, `👤 @${username}\n\n⚠️ System busy, try again.`);
+      sendTelegramMessage(chatId, `👤 @${displayName}\n\n⚠️ System busy, try again.`);
       return;
     }
 
     const today = getTodayDate();
     
     Logger.log('=== CANCEL FAST ===');
-    Logger.log('Username: ' + username);
+    Logger.log('Username: ' + displayName + ' | UserId: ' + userKey);
     
     // Get active breaks from Properties
     const activeBreaks = getActiveBreaksFromProperties();
     
-    if (!activeBreaks[username]) {
+    let breakInfo = activeBreaks[userKey];
+    let legacyKey = null;
+    if (!breakInfo && activeBreaks[displayName]) {
+      breakInfo = activeBreaks[displayName];
+      legacyKey = displayName;
+    }
+    
+    if (!breakInfo) {
       Logger.log('❌ No break found to cancel');
-      sendTelegramMessage(chatId, `👤 @${username}\n\n⚠️ No entry to cancel today!`);
+      sendTelegramMessage(chatId, `👤 @${displayName}\n\n⚠️ No entry to cancel today!`);
       return;
     }
     
-    const breakCode = activeBreaks[username].breakCode;
+    const breakCode = breakInfo.breakCode;
     
     // Remove from Properties
-    delete activeBreaks[username];
+    if (legacyKey) {
+      delete activeBreaks[legacyKey];
+    }
+    delete activeBreaks[userKey];
     saveActiveBreaksToProperties(activeBreaks);
     Logger.log('✅ Break removed from Properties');
     
     // Delete from Live_Breaks in background
-    deleteFromLiveBreaksAsync(username, today);
+    deleteFromLiveBreaksAsync(userKey, displayName, today);
     
     // Decrement daily counter
-    decrementDailyBreakCount(username, breakCode, today);
+    decrementDailyBreakCount(userKey, breakCode, today, displayName);
     
-    const message = `👤 @${username}\n\n${getRandomSarcasm(breakCode, 'cancelled')}`;
+    const message = `👤 @${displayName}\n\n${getRandomSarcasm(breakCode, 'cancelled')}`;
     sendTelegramMessage(chatId, message);
     
     Logger.log('✅ Cancel successful');
     
   } catch (error) {
     Logger.log('❌ Error in handleCancelFast: ' + error);
-    sendTelegramMessage(chatId, `👤 @${username}\n\n⚠️ Error cancelling break.`);
+    sendTelegramMessage(chatId, `👤 @${displayName}\n\n⚠️ Error cancelling break.`);
   } finally {
     lock.releaseLock();
   }
@@ -445,10 +498,10 @@ function saveActiveBreaksToProperties(activeBreaks) {
 /**
  * Get daily break count from cache
  */
-function getDailyBreakCountFast(username, breakCode, today) {
+function getDailyBreakCountFast(userKey, breakCode, today, displayName) {
   try {
     const cache = CacheService.getScriptCache();
-    const key = `count_${username}_${breakCode}_${today}`;
+    const key = `count_${userKey}_${breakCode}_${today}`;
     
     const cached = cache.get(key);
     if (cached !== null) {
@@ -459,7 +512,7 @@ function getDailyBreakCountFast(username, breakCode, today) {
     Logger.log('❌ Cache MISS: ' + key);
     
     // Fallback: Read from sheet
-    const count = getDailyBreakCountFromSheet(username, breakCode, today);
+    const count = getDailyBreakCountFromSheet(userKey, breakCode, today, displayName);
     
     // Cache for 24 hours
     cache.put(key, String(count), 86400);
@@ -475,12 +528,12 @@ function getDailyBreakCountFast(username, breakCode, today) {
 /**
  * Increment daily break count in cache
  */
-function incrementDailyBreakCount(username, breakCode, today) {
+function incrementDailyBreakCount(userKey, breakCode, today, displayName) {
   try {
     const cache = CacheService.getScriptCache();
-    const key = `count_${username}_${breakCode}_${today}`;
+    const key = `count_${userKey}_${breakCode}_${today}`;
     
-    let count = getDailyBreakCountFast(username, breakCode, today);
+    let count = getDailyBreakCountFast(userKey, breakCode, today, displayName);
     count++;
     
     cache.put(key, String(count), 86400);
@@ -494,12 +547,12 @@ function incrementDailyBreakCount(username, breakCode, today) {
 /**
  * Decrement daily break count in cache (for cancel)
  */
-function decrementDailyBreakCount(username, breakCode, today) {
+function decrementDailyBreakCount(userKey, breakCode, today, displayName) {
   try {
     const cache = CacheService.getScriptCache();
-    const key = `count_${username}_${breakCode}_${today}`;
+    const key = `count_${userKey}_${breakCode}_${today}`;
     
-    let count = getDailyBreakCountFast(username, breakCode, today);
+    let count = getDailyBreakCountFast(userKey, breakCode, today, displayName);
     if (count > 0) {
       count--;
       cache.put(key, String(count), 86400);
@@ -514,19 +567,23 @@ function decrementDailyBreakCount(username, breakCode, today) {
 /**
  * Get daily break count from sheet (fallback)
  */
-function getDailyBreakCountFromSheet(username, breakCode, today) {
+function getDailyBreakCountFromSheet(userKey, breakCode, today, displayName) {
   try {
     const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
     const data = logSheet.getDataRange().getValues();
     
     const count = data.filter((row, idx) => {
+      const rowUserId = row.length > 8 ? String(row[8]) : '';
+      const userMatches = rowUserId
+        ? rowUserId === String(userKey)
+        : String(row[2]) === String(displayName);
       return idx > 0 && 
              String(row[0]) === today && 
-             String(row[2]) === username && 
+             userMatches && 
              String(row[3]) === breakCode;
     }).length;
     
-    Logger.log('📊 Sheet count for ' + username + ' ' + breakCode + ': ' + count);
+    Logger.log('📊 Sheet count for ' + displayName + ' ' + breakCode + ': ' + count);
     return count;
     
   } catch (error) {
@@ -542,14 +599,14 @@ function getDailyBreakCountFromSheet(username, breakCode, today) {
 /**
  * Write break to Live_Breaks sheet (async - don't block)
  */
-function writeBreakToSheetAsync(username, breakCode, duration, today, timeStr, chatId) {
+function writeBreakToSheetAsync(userKey, displayName, breakCode, duration, today, timeStr, chatId) {
   try {
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
     const newRow = liveSheet.getLastRow() + 1;
     
-    // Single batch write (7 columns)
-    const rowData = [today, timeStr, username, breakCode, duration, 'ON BREAK', String(chatId)];
-    liveSheet.getRange(newRow, 1, 1, 7).setValues([rowData]).setNumberFormat('@');
+    // Single batch write (8 columns)
+    const rowData = [today, timeStr, displayName, breakCode, duration, 'ON BREAK', String(chatId), String(userKey)];
+    liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
     
     Logger.log('✅ Break written to Live_Breaks (async)');
     
@@ -562,16 +619,16 @@ function writeBreakToSheetAsync(username, breakCode, duration, today, timeStr, c
 /**
  * Write punch log to Punch_Logs sheet (async)
  */
-function writePunchLogAsync(username, breakCode, today, startTime, endTime, actualMinutes, expectedDuration, chatId) {
+function writePunchLogAsync(userKey, displayName, breakCode, today, startTime, endTime, actualMinutes, expectedDuration, chatId) {
   try {
     const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
     const newRow = logSheet.getLastRow() + 1;
     
     let status = actualMinutes > expectedDuration ? '⚠️ OVER TIME' : '✅ OK';
     
-    // Single batch write (8 columns)
-    const rowData = [today, startTime, username, breakCode, actualMinutes, endTime, status, String(chatId)];
-    logSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+    // Single batch write (9 columns)
+    const rowData = [today, startTime, displayName, breakCode, actualMinutes, endTime, status, String(chatId), String(userKey)];
+    logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
     
     Logger.log('✅ Punch log written to Punch_Logs (async)');
     
@@ -583,7 +640,7 @@ function writePunchLogAsync(username, breakCode, today, startTime, endTime, actu
 /**
  * Delete from Live_Breaks sheet (async)
  */
-function deleteFromLiveBreaksAsync(username, today) {
+function deleteFromLiveBreaksAsync(userKey, displayName, today) {
   try {
     const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
     const data = liveSheet.getDataRange().getValues();
@@ -592,8 +649,11 @@ function deleteFromLiveBreaksAsync(username, today) {
     for (let i = data.length - 1; i >= 1; i--) {
       const rowDate = String(data[i][0]);
       const rowUser = String(data[i][2]);
+      const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
       
-      if (rowDate === today && rowUser === username) {
+      const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
+      
+      if (rowDate === today && userMatches) {
         liveSheet.deleteRow(i + 1);
         Logger.log('✅ Deleted row ' + (i + 1) + ' from Live_Breaks (async)');
         break;
@@ -612,7 +672,7 @@ function deleteFromLiveBreaksAsync(username, today) {
 /**
  * Process break using sheets (slow but safe fallback)
  */
-function processBreakSlow(username, breakCode, userId, chatId) {
+function processBreakSlow(userKey, displayName, breakCode, chatId) {
   Logger.log('⚠️ Using SLOW path (sheet-based processing)');
   
   const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
@@ -627,8 +687,10 @@ function processBreakSlow(username, breakCode, userId, chatId) {
     const rowDate = String(data[i][0]);
     const rowUser = String(data[i][2]);
     const rowStatus = String(data[i][5]);
+    const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+    const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
     
-    if (rowDate === today && rowUser === username && rowStatus === 'ON BREAK') {
+    if (rowDate === today && userMatches && rowStatus === 'ON BREAK') {
       return {
         success: false,
         message: `🤨 You already have an active break!\n\nActive: ${data[i][3]} (${data[i][1]})\n\nType "back" to close it first!`
@@ -637,13 +699,13 @@ function processBreakSlow(username, breakCode, userId, chatId) {
   }
   
   // Check daily limit
-  const dailyCount = getDailyBreakCountFromSheet(username, breakCode, today);
+  const dailyCount = getDailyBreakCountFromSheet(userKey, breakCode, today, displayName);
   const limitReached = dailyCount >= breakConfig.dailyLimit;
   
   // Write to sheet
   const newRow = liveSheet.getLastRow() + 1;
-  const rowData = [today, timeStr, username, breakCode, breakConfig.duration, 'ON BREAK', String(chatId)];
-  liveSheet.getRange(newRow, 1, 1, 7).setValues([rowData]).setNumberFormat('@');
+  const rowData = [today, timeStr, displayName, breakCode, breakConfig.duration, 'ON BREAK', String(chatId), String(userKey)];
+  liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
   
   let message = `Status: OK | ${dailyCount + 1}/${breakConfig.dailyLimit} used today`;
   if (limitReached) {
@@ -659,7 +721,7 @@ function processBreakSlow(username, breakCode, userId, chatId) {
 /**
  * Handle punch back using sheets (slow fallback)
  */
-function handlePunchBackSlow(username, chatId) {
+function handlePunchBackSlow(userKey, displayName, chatId) {
   Logger.log('⚠️ Using SLOW path (sheet-based punch back)');
   
   const liveSheet = getOrCreateSheet(LIVE_BREAKS_SHEET);
@@ -674,8 +736,10 @@ function handlePunchBackSlow(username, chatId) {
     const rowDate = String(data[i][0]);
     const rowUser = String(data[i][2]);
     const rowStatus = String(data[i][5]);
+    const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+    const userMatches = rowUserId ? rowUserId === String(userKey) : rowUser === displayName;
     
-    if (rowDate === today && rowUser === username && rowStatus === 'ON BREAK') {
+    if (rowDate === today && userMatches && rowStatus === 'ON BREAK') {
       const breakStartTime = data[i][1];
       const expectedDuration = data[i][4];
       const breakCode = data[i][3];
@@ -691,8 +755,8 @@ function handlePunchBackSlow(username, chatId) {
       // Write to Punch_Logs
       const newRow = logSheet.getLastRow() + 1;
       const status = actualMinutes > expectedDuration ? '⚠️ OVER TIME' : '✅ OK';
-      const rowData = [today, breakStartTime, username, breakCode, actualMinutes, timeStr, status, String(chatId)];
-      logSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+      const rowData = [today, breakStartTime, displayName, breakCode, actualMinutes, timeStr, status, String(chatId), String(userKey)];
+      logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
       
       // Delete from Live_Breaks
       liveSheet.deleteRow(i + 1);
@@ -748,13 +812,18 @@ function syncPropertiesToSheets() {
     let removed = 0;
     
     // 1. Check Properties → Sheet (add missing)
-    for (const username in activeBreaks) {
-      const breakInfo = activeBreaks[username];
+    for (const userKey in activeBreaks) {
+      const breakInfo = activeBreaks[userKey];
+      const displayName = breakInfo.username || userKey;
+      const userId = breakInfo.userId ? String(breakInfo.userId) : String(userKey);
       
       // Check if exists in sheet
       let found = false;
       for (let i = 1; i < data.length; i++) {
-        if (String(data[i][2]) === username && String(data[i][0]) === breakInfo.startDate) {
+        const rowUser = String(data[i][2]);
+        const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+        const userMatches = rowUserId ? rowUserId === userId : rowUser === displayName;
+        if (userMatches && String(data[i][0]) === breakInfo.startDate) {
           found = true;
           synced++;
           break;
@@ -767,15 +836,16 @@ function syncPropertiesToSheets() {
         const rowData = [
           breakInfo.startDate,
           breakInfo.startTime,
-          username,
+          displayName,
           breakInfo.breakCode,
           breakInfo.expectedDuration,
           'ON BREAK',
-          breakInfo.chatId
+          breakInfo.chatId,
+          userId
         ];
-        liveSheet.getRange(newRow, 1, 1, 7).setValues([rowData]).setNumberFormat('@');
+        liveSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
         added++;
-        Logger.log('➕ Added to sheet: ' + username);
+        Logger.log('➕ Added to sheet: ' + displayName);
       }
     }
     
@@ -787,7 +857,11 @@ function syncPropertiesToSheets() {
       const rowStatus = String(data[i][5]);
       
       if (rowDate === today && rowStatus === 'ON BREAK') {
-        if (!activeBreaks[rowUser]) {
+        const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+        const hasEntry = rowUserId
+          ? (activeBreaks[rowUserId] || activeBreaks[rowUser])
+          : activeBreaks[rowUser];
+        if (!hasEntry) {
           // Remove from sheet (orphan)
           liveSheet.deleteRow(i + 1);
           removed++;
@@ -837,8 +911,12 @@ function loadPropertiesFromSheets() {
       
       if (rowDate === today && rowStatus === 'ON BREAK') {
         const username = String(data[i][2]);
+        const userId = data[i].length > 7 ? String(data[i][7]) : '';
+        const userKey = userId ? userId : username;
         
-        activeBreaks[username] = {
+        activeBreaks[userKey] = {
+          userId: userId || userKey,
+          username: username,
           breakCode: String(data[i][3]),
           startTime: String(data[i][1]),
           startDate: rowDate,
@@ -1035,17 +1113,18 @@ function getTimeString(date) {
  * Helper function to get or create a sheet
  */
 function getOrCreateSheet(sheetName) {
+  requireConfig();
   const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
   let sheet = spreadsheet.getSheetByName(sheetName);
   
   if (!sheet) {
     if (sheetName === LIVE_BREAKS_SHEET) {
       sheet = spreadsheet.insertSheet(sheetName, 1);
-      const headers = ['DATE', 'TIME', 'NAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID'];
+      const headers = ['DATE', 'TIME', 'NAME', 'BREAK_CODE', 'EXPECTED_DURATION', 'STATUS', 'CHAT_ID', 'USER_ID'];
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     } else if (sheetName === PUNCH_LOG_SHEET) {
       sheet = spreadsheet.insertSheet(sheetName);
-      const headers = ['DATE', 'TIME_START', 'NAME', 'BREAK_CODE', 'TIME_SPENT', 'TIME_END', 'STATUS', 'CHAT_ID'];
+      const headers = ['DATE', 'TIME_START', 'NAME', 'BREAK_CODE', 'TIME_SPENT', 'TIME_END', 'STATUS', 'CHAT_ID', 'USER_ID'];
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     } else if (sheetName === 'Performance_Logs') {
       sheet = spreadsheet.insertSheet(sheetName);
@@ -1060,7 +1139,22 @@ function getOrCreateSheet(sheetName) {
     }
   }
   
+  if (sheetName === LIVE_BREAKS_SHEET || sheetName === PUNCH_LOG_SHEET) {
+    ensureUserIdColumn(sheet);
+  }
+  
   return sheet;
+}
+
+function ensureUserIdColumn(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    return;
+  }
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (!headers.includes('USER_ID')) {
+    sheet.getRange(1, headers.length + 1).setValue('USER_ID');
+  }
 }
 
 // ============================================
@@ -1144,6 +1238,7 @@ function parseBreakCode(text) {
 }
 
 function sendTelegramMessage(chatId, text) {
+  requireConfig();
   const safeText = (text ?? '').toString().trim();
   if (!safeText) {
     Logger.log('⚠️ Skipped empty Telegram message. chatId=' + chatId);
@@ -1152,8 +1247,7 @@ function sendTelegramMessage(chatId, text) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   const payload = {
     chat_id: chatId,
-    text: safeText,
-    parse_mode: 'HTML'
+    text: safeText
   };
   UrlFetchApp.fetch(url, {
     method: 'post',
@@ -1199,6 +1293,8 @@ function autoPunchBackOvertime() {
       const breakStartTime = String(data[i][1]);
       const expectedDuration = parseInt(data[i][4]);
       const chatId = data[i][6];
+      const rowUserId = data[i].length > 7 ? String(data[i][7]) : '';
+      const userKey = rowUserId ? rowUserId : String(username);
       
       const startParts = breakStartTime.split(':');
       const startSeconds = parseInt(startParts[0]) * 3600 + parseInt(startParts[1]) * 60 + parseInt(startParts[2] || 0);
@@ -1216,15 +1312,18 @@ function autoPunchBackOvertime() {
       if (elapsedMinutes > expectedDuration + 5) {
         // Write to Punch_Logs
         const newRow = logSheet.getLastRow() + 1;
-        const rowData = [today, breakStartTime, username, breakCode, elapsedMinutes, currentTimeStr, '⚠️ AUTO PUNCHED', String(chatId)];
-        logSheet.getRange(newRow, 1, 1, 8).setValues([rowData]).setNumberFormat('@');
+        const rowData = [today, breakStartTime, username, breakCode, elapsedMinutes, currentTimeStr, '⚠️ AUTO PUNCHED', String(chatId), String(userKey)];
+        logSheet.getRange(newRow, 1, 1, 9).setValues([rowData]).setNumberFormat('@');
         
         rowsToDelete.push(i + 1);
         
         // Remove from Properties
         try {
           const activeBreaks = getActiveBreaksFromProperties();
-          delete activeBreaks[username];
+          delete activeBreaks[userKey];
+          if (activeBreaks[username]) {
+            delete activeBreaks[username];
+          }
           saveActiveBreaksToProperties(activeBreaks);
         } catch (e) {
           Logger.log('⚠️ Error updating Properties in auto-punch: ' + e);
@@ -1248,6 +1347,7 @@ function autoPunchBackOvertime() {
  * Daily report (same as original)
  */
 function dailyReport() {
+  requireConfig();
   const logSheet = getOrCreateSheet(PUNCH_LOG_SHEET);
   const now = new Date();
   const today = Utilities.formatDate(now, Session.getScriptTimeZone(), 'M/d/yyyy');
@@ -1308,6 +1408,7 @@ function dailyReport() {
  * Monthly migration (same as original)
  */
 function monthlyMigration() {
+  requireConfig();
   const today = new Date();
   if (today.getDate() !== 1) return;
   
@@ -1337,6 +1438,7 @@ function monthlyMigration() {
 // ============================================
 
 function setupTriggers() {
+  requireConfig();
   const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
   spreadsheet.setSpreadsheetTimeZone('Asia/Dubai');
   
@@ -1395,6 +1497,7 @@ function setScriptPropertiesFromParams(params) {
  * Initialize system - Run once after deployment
  */
 function initializeSystem() {
+  requireConfig();
   Logger.log('====================================');
   Logger.log('🚀 INITIALIZING FASTEST SYSTEM');
   Logger.log('====================================');
